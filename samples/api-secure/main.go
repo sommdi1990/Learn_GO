@@ -5,12 +5,17 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	jwt "github.com/golang-jwt/jwt/v5"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type apiError struct {
@@ -23,6 +28,16 @@ type apiResponse[T any] struct {
 	Error *apiError `json:"error,omitempty"`
 }
 
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(statusCode int) {
+	w.code = statusCode
+	w.ResponseWriter.WriteHeader(statusCode)
+}
+
 type item struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
@@ -33,6 +48,8 @@ var (
 	nextID     = 1
 	apiKey     = getEnv("API_KEY", "secret")
 	rateTokens = make(map[string]int)
+	jwtSecret  = []byte(getEnv("JWT_SECRET", "dev-secret"))
+	reqCounter = prometheus.NewCounterVec(prometheus.CounterOpts{Name: "api_requests_total", Help: "total api requests"}, []string{"path", "method", "code"})
 )
 
 func getEnv(k, d string) string {
@@ -44,10 +61,12 @@ func getEnv(k, d string) string {
 }
 
 func main() {
+	prometheus.MustRegister(reqCounter)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", handleHealth)
 	mux.HandleFunc("/items", withSecurity(handleItems))
 	mux.HandleFunc("/items/", withSecurity(handleItemByID))
+	mux.Handle("/metrics", promhttp.Handler())
 
 	srv := &http.Server{
 		Addr:              ":8080",
@@ -86,26 +105,44 @@ func withCommon(next http.Handler) http.Handler {
 			}
 			log.Printf("rid=%s %s %s %dms", rid, r.Method, r.URL.Path, time.Since(start).Milliseconds())
 		}()
-		next.ServeHTTP(w, r)
+		sw := &statusWriter{ResponseWriter: w, code: http.StatusOK}
+		next.ServeHTTP(sw, r)
+		reqCounter.WithLabelValues(r.URL.Path, r.Method, strconv.Itoa(sw.code)).Inc()
 	})
 }
 
 func withSecurity(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// API key auth minimal
-		key := r.Header.Get("X-API-Key")
-		if key == "" {
-			// also support Authorization: Bearer <key>
-			if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-				key = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		authorized := false
+		// Prefer JWT if provided
+		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if t, err := jwt.Parse(tok, func(t *jwt.Token) (any, error) {
+				if t.Method != jwt.SigningMethodHS256 {
+					return nil, fmt.Errorf("alg")
+				}
+				return jwtSecret, nil
+			}); err == nil && t.Valid {
+				authorized = true
 			}
 		}
-		if key != apiKey {
-			writeJSON(w, http.StatusUnauthorized, nil, &apiError{Code: "unauthorized", Message: "invalid api key"})
+		if !authorized {
+			// Fallback API key
+			key := r.Header.Get("X-API-Key")
+			if key == apiKey {
+				authorized = true
+			}
+		}
+		if !authorized {
+			writeJSON(w, http.StatusUnauthorized, nil, &apiError{Code: "unauthorized", Message: "invalid credentials"})
 			return
 		}
 		// naive rate limit per key (token bucket size 5 per minute)
-		if !allow(key) {
+		k := r.Header.Get("X-API-Key")
+		if k == "" {
+			k = "jwt"
+		}
+		if !allow(k) {
 			writeJSON(w, http.StatusTooManyRequests, nil, &apiError{Code: "rate_limited", Message: "too many requests"})
 			return
 		}

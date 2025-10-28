@@ -1,6 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -58,6 +61,12 @@ func main() {
 func withCommon(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		// request id
+		rid := r.Header.Get("X-Request-ID")
+		if rid == "" {
+			rid = generateID()
+		}
+		w.Header().Set("X-Request-ID", rid)
 		// CORS
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS")
@@ -69,11 +78,13 @@ func withCommon(next http.Handler) http.Handler {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
+		// limit body size (1MB)
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		defer func() {
 			if rec := recover(); rec != nil {
 				writeJSON(w, http.StatusInternalServerError, nil, &apiError{Code: "internal_error", Message: "internal server error"})
 			}
-			log.Printf("%s %s %dms", r.Method, r.URL.Path, time.Since(start).Milliseconds())
+			log.Printf("rid=%s %s %s %dms", rid, r.Method, r.URL.Path, time.Since(start).Milliseconds())
 		}()
 		next.ServeHTTP(w, r)
 	})
@@ -162,6 +173,14 @@ func handleItemByID(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		// ETag support
+		b, _ := json.Marshal(it)
+		etag := computeETag(b)
+		w.Header().Set("ETag", etag)
+		if inm := r.Header.Get("If-None-Match"); inm == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
 		writeJSON(w, http.StatusOK, it, nil)
 	case http.MethodDelete:
 		delete(items, id)
@@ -192,4 +211,17 @@ func writeJSON(w http.ResponseWriter, status int, data any, apiErr *apiError) {
 		resp.Data = &data
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func generateID() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return hex.EncodeToString(b)
+}
+
+func computeETag(b []byte) string {
+	h := sha256.Sum256(b)
+	return `W/"` + hex.EncodeToString(h[:]) + `"`
 }

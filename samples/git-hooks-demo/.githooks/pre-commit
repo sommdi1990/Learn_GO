@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if command -v golangci-lint >/dev/null 2>&1; then
+  echo "[pre-commit] linting..."
+  golangci-lint run ./...
+else
+  echo "[pre-commit] golangci-lint not found, skipping lint"
+fi
+
+echo "[pre-commit] testing..."
+go test ./...
+
+echo "[pre-commit] OK"
+
+

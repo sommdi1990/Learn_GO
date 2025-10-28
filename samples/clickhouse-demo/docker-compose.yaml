@@ -1,0 +1,17 @@
+version: '3.8'
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    ports:
+      - "8123:8123" # HTTP
+      - "9000:9000" # Native
+    environment:
+      - CLICKHOUSE_DB=demo
+      - CLICKHOUSE_USER=demo
+      - CLICKHOUSE_PASSWORD=demo
+    volumes:
+      - ch_data:/var/lib/clickhouse
+volumes:
+  ch_data: { }
+
+

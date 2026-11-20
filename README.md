@@ -1,21 +1,15 @@
-## Learn_GO
+# Go examples for protocols, handlers and concurrency
 
-نمونه‌کدها و مستندات آموزشی زبان Go بر اساس پروژه‌های واقعی موجود در مسیر `/home/soroush/go`.
+Independent Go programs isolate topics that are hard to see inside a larger service. Examples include assembling DNS messages, handling HTTP requests, working with channels and controlling worker throughput.
 
-### ویکی (مستندات)
+The DNS exercise splits query construction from response parsing. The HTTP test example puts the handler beside its test, making it a small entry point for reviewing request and response behavior without following the database-backed samples.
 
-- فهرست کامل مباحث در `Learn_GO.wiki/Home.md`
-- موضوعات: ساختار پروژه، ماژول‌ها، کانفیگ، لاگینگ، خطاها، HTTP/API، دیتابیس و مهاجرت‌ها، همزمانی،
-  Worker/Scheduler/RateLimiter، تست و ابزارها، Docker/Compose، SMTP/DMARC، CoreDNS، Kafka/Redpanda، Redis، ClickHouse،
-  Git hooks، طراحی API و امنیت.
+- [query_pack.go](samples/dnsmessage/query_pack.go)
+- [response_parse.go](samples/dnsmessage/response_parse.go)
+- [handler.go](samples/httptest-demo/handler.go)
+- [handler_test.go](samples/httptest-demo/handler_test.go)
 
-### پیش‌نیازها
-
-- Go 1.22+
-- Docker و Docker Compose (برای برخی نمونه‌ها مانند Redis/ClickHouse)
-- ابزار اختیاری: `golangci-lint`
-
-### نمونه‌کدها (Samples)
+## نمونه‌های مستقل
 
 1) API امن و CRUD: `samples/api-secure`
 
@@ -82,5 +76,3 @@ cd samples/git-hooks-demo
 make install-hooks
 git add . && git commit -m "test hooks"
 ```
-
-برای توضیحات بیشتر هر نمونه، به صفحهٔ «نمونه‌کدها» در ویکی مراجعه کنید: `Learn_GO.wiki/99-نمونه-کدها.md`.
